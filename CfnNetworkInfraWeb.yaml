@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Cfn Template for Base VPC Configuration
+Transform: AWS::LanguageExtensions
+Mappings:
+  SubnetParameters:
+    Public:
+      MapIpv4: True
+    Private:
+      MapIpv4: False
+  SubnetA:
+    Public:
+      Cidr: 10.0.1.0/24
+      AZ: 0
+    Private:
+      Cidr: 10.0.4.0/24
+      AZ: 0
+  SubnetB:
+    Public:
+      Cidr: 10.0.2.0/24
+      AZ: 1
+    Private:
+      Cidr: 10.0.5.0/24
+      AZ: 1
+  SubnetC:
+    Public:
+      Cidr: 10.0.3.0/24
+      AZ: 2
+    Private:
+      Cidr: 10.0.6.0/24
+      AZ: 2
+Resources:
+  Fn::ForEach::Subnets:
+    - SubnetIdentifier
+    - [SubnetA, SubnetB, SubnetC]
+    - Fn::ForEach::SubnetAvailability:
+      - Availability
+      - [Public, Private]
+      - 'WebInfraProduction${Availability}${SubnetIdentifier}':
+          Type: AWS::EC2::Subnet
+          Properties:
+            VpcId: !Ref WebInfraProductionVPC
+            CidrBlock: !FindInMap 
+              - !Ref SubnetIdentifier
+              - !Ref Availability
+              - Cidr
+            AvailabilityZone: !Select [ Fn::FindInMap: [ !Ref SubnetIdentifier, !Ref Availability, AZ ], Fn::GetAZs: !Ref AWS::Region ]
+            MapPublicIpOnLaunch: !FindInMap 
+              - SubnetParameters
+              - !Ref Availability
+              - MapIpv4
+            Tags:
+              - Key: Name
+                Value: !Sub "WebInfraProduction${Availability}${SubnetIdentifier}"
+  WebInfraProductionVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionVpc
+Outputs:
+  WebInfraProductionVpcId:
+    Description: VPC ID of Web Infra
+    Value: !Ref WebInfraProductionVPC
+    Export: 
+      Name: !Sub "${AWS::StackName}-WebInfraProductionVpcId"
+  Fn::ForEach::OutputSubnets:
+    - SubnetIdentifier
+    - [SubnetA, SubnetB, SubnetC]
+    - Fn::ForEach::OutputSubnetAvailability:
+      - Availability
+      - [Public, Private]
+      - 'WebInfraProduction${Availability}${SubnetIdentifier}Id':
+          Description: !Sub "${Availability}${SubnetIdentifier} Subnet ID"
+          Value: !Ref
+            'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
+          Export: 
+            Name: !Sub "${AWS::StackName}-WebInfraProduction${Availability}${SubnetIdentifier}Id"
