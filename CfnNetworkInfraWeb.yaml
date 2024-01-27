@@ -132,6 +132,76 @@ Resources:
       RouteTableId: !Ref WebInfraProductionPublicRouteTable
       DestinationCidrBlock: '0.0.0.0/0'
       GatewayId: !Ref WebInfraProductionPublicIGW
+  # Public NACL Configuration into VPC
+  WebInfraProductionPublicNACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref WebInfraProductionVPC
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionPublicNACL
+  WebInfraProductionPublicNACLIngressRule:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionPublicNACL
+      RuleNumber: 10
+      Protocol: 6
+      RuleAction: allow
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: 443
+        To: 443
+  WebInfraProductionPublicNACLEgressRule:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionPublicNACL
+      RuleNumber: 10
+      Protocol: -1
+      Egress: True
+      RuleAction: allow
+      CidrBlock: 0.0.0.0/0
+  # Private NACL Configuration into VPC
+  WebInfraProductionPrivateNACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref WebInfraProductionVPC
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionPrivateNACL
+  WebInfraProductionPrivateNACLIngressRule:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionPrivateNACL
+      RuleNumber: 10
+      Protocol: 6
+      RuleAction: allow
+      CidrBlock: 10.0.0.0/16
+      PortRange:
+        From: 80
+        To: 80
+  WebInfraProductionPrivateNACLEgressRule:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionPrivateNACL
+      RuleNumber: 10
+      Protocol: -1
+      Egress: True
+      RuleAction: allow
+      CidrBlock: 0.0.0.0/0
+  # Public/Private NACL Subnet Associations
+  Fn::ForEach::NACLAssociation:
+    - SubnetIdentifier
+    - [SubnetA, SubnetB, SubnetC]
+    - Fn::ForEach::NACLAvailability:
+      - Availability
+      - [Public, Private]
+      - 'WebInfraProduction${Availability}${SubnetIdentifier}NACLAssociation':
+          Type: AWS::EC2::SubnetNetworkAclAssociation
+          Properties:
+            NetworkAclId: !Ref
+              'Fn::Sub': 'WebInfraProduction${Availability}NACL'
+            SubnetId: !Ref
+              'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
 Outputs:
   # Assume creation of VPC/Subnets is static and
   # reduce template length by exporting values needed
