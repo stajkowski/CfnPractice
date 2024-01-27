@@ -29,6 +29,15 @@ Mappings:
       Cidr: 10.0.6.0/24
       AZ: 2
 Resources:
+  # Creation of VPC and Subnets with auto allocation to 3 AZs per mappings
+  WebInfraProductionVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionVpc
+  # Loop through and create each public and private subnet per mappings
   Fn::ForEach::Subnets:
     - SubnetIdentifier
     - [SubnetA, SubnetB, SubnetC]
@@ -43,22 +52,79 @@ Resources:
               - !Ref SubnetIdentifier
               - !Ref Availability
               - Cidr
+            # Retrieve AZ list position from subnet mappings and use it to select AZ from alphabetical list
             AvailabilityZone: !Select [ Fn::FindInMap: [ !Ref SubnetIdentifier, !Ref Availability, AZ ], Fn::GetAZs: !Ref AWS::Region ]
             MapPublicIpOnLaunch: !FindInMap 
-              - SubnetParameters
+              - SubnetParameters # subnet params are used to limit duplication in subnets
               - !Ref Availability
               - MapIpv4
             Tags:
               - Key: Name
                 Value: !Sub "WebInfraProduction${Availability}${SubnetIdentifier}"
-  WebInfraProductionVPC:
-    Type: AWS::EC2::VPC
+  # Create NAT and IGW Gateways w/ NAT EIP
+  WebInfraProductionPublicIGW:
+    Type: AWS::EC2::InternetGateway
     Properties:
-      CidrBlock: 10.0.0.0/16
       Tags:
         - Key: Name
-          Value: WebInfraProductionVpc
+          Value: WebInfraProductionPublicIGW
+  WebInfraProductionPublicNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !Ref WebInfraProductionNATGatewayEIP
+      SubnetId: !Ref WebInfraProductionPrivateSubnetA
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionPublicNATGateway
+  WebInfraProductionNATGatewayEIP:
+    Type: AWS::EC2:EIP
+    Properties:
+      Domain: vpc
+  # Create 2 Route Tables Public/Private and Associate appropriate subnets to each
+  WebInfraProductionPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WebInfraProductionVPC
+      Tags:
+        - Key: Name
+          Value: !Sub "WebInfraProductionPublicRouteTable"
+  WebInfraProductionPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WebInfraProductionVPC
+      Tags:
+        - Key: Name
+          Value: !Sub "WebInfraProductionPrivateRouteTable"
+  Fn::ForEach::RouteTableAssociation:
+    - SubnetIdentifier
+    - [SubnetA, SubnetB, SubnetC]
+    - Fn::ForEach::SubnetAvailability:
+      - Availability
+      - [Public, Private]
+      - 'WebInfraProduction${Availability}${SubnetIdentifier}RouteTableAssociation':
+          Type: AWS::EC2::SubnetRouteTableAssociation
+          Properties:
+            RouteTableId: !Ref
+              'Fn::Sub': 'WebInfraProduction${Availability}RouteTable'
+            SubnetId: !Ref
+              'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
+  # Finally, create the routes for default outbound to NAT on private and IGW on public
+  WebInfraProductionRouteNATGateway:
+    Type: AWS::EC2::Route
+    DependsOn: WebInfraProductionPublicNATGateway
+    Properties:
+      RouteTableId: !Ref WebInfraProductionPrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref WebInfraProductionPublicNATGateway
+  WebInfraProductionRouteIGW:
+    Type: AWS::EC2::Route
+    DependsOn: WebInfraProductionPublicIGW
+    Properties:
+      RouteTableId: !Ref WebInfraProductionPublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref WebInfraProductionPublicIGW
 Outputs:
+  # Export all Subnet and VPC IDs for use in other templates
   WebInfraProductionVpcId:
     Description: VPC ID of Web Infra
     Value: !Ref WebInfraProductionVPC
@@ -71,7 +137,7 @@ Outputs:
       - Availability
       - [Public, Private]
       - 'WebInfraProduction${Availability}${SubnetIdentifier}Id':
-          Description: !Sub "${Availability}${SubnetIdentifier} Subnet ID"
+          Description: !Sub "${Availability} ${SubnetIdentifier} Subnet ID"
           Value: !Ref
             'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
           Export: 
