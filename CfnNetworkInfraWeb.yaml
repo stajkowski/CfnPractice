@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: Cfn Template for Base VPC Configuration
 Transform: AWS::LanguageExtensions
 Mappings:
+  # Public Subnets designate the ALB AZs to use on
+  # backend registered private targets, so all are
+  # required.  This will use the first 3 AZs that
+  # are in alphabetical order returned from the
+  # intrinsic function GetAZs.
   SubnetParameters:
     Public:
       MapIpv4: True
@@ -29,7 +34,7 @@ Mappings:
       Cidr: 10.0.6.0/24
       AZ: 2
 Resources:
-  # Creation of VPC and Subnets with auto allocation to 3 AZs per mappings
+  # VPC & Subnet Creation
   WebInfraProductionVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -37,7 +42,6 @@ Resources:
       Tags:
         - Key: Name
           Value: WebInfraProductionVpc
-  # Loop through and create each public and private subnet per mappings
   Fn::ForEach::Subnets:
     - SubnetIdentifier
     - [SubnetA, SubnetB, SubnetC]
@@ -52,35 +56,15 @@ Resources:
               - !Ref SubnetIdentifier
               - !Ref Availability
               - Cidr
-            # Retrieve AZ list position from subnet mappings and use it to select AZ from alphabetical list
             AvailabilityZone: !Select [ Fn::FindInMap: [ !Ref SubnetIdentifier, !Ref Availability, AZ ], Fn::GetAZs: !Ref AWS::Region ]
             MapPublicIpOnLaunch: !FindInMap 
-              - SubnetParameters # subnet params are used to limit duplication in subnets
+              - SubnetParameters
               - !Ref Availability
               - MapIpv4
             Tags:
               - Key: Name
                 Value: !Sub "WebInfraProduction${Availability}${SubnetIdentifier}"
-  # Create NAT and IGW Gateways w/ NAT EIP
-  WebInfraProductionPublicIGW:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: WebInfraProductionPublicIGW
-  WebInfraProductionPublicNATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !Ref WebInfraProductionNATGatewayEIP
-      SubnetId: !Ref WebInfraProductionPrivateSubnetA
-      Tags:
-        - Key: Name
-          Value: WebInfraProductionPublicNATGateway
-  WebInfraProductionNATGatewayEIP:
-    Type: AWS::EC2:EIP
-    Properties:
-      Domain: vpc
-  # Create 2 Route Tables Public/Private and Associate appropriate subnets to each
+  # Route Table Creation & Subnet Association
   WebInfraProductionPublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -108,7 +92,33 @@ Resources:
               'Fn::Sub': 'WebInfraProduction${Availability}RouteTable'
             SubnetId: !Ref
               'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
-  # Finally, create the routes for default outbound to NAT on private and IGW on public
+  # IGW/NAT Gateway Creation and Association with VPC
+  WebInfraProductionPublicIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionPublicIGW
+  WebInfraProductionPublicIGWAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref WebInfraProductionPublicIGW
+      VpcId: !Ref WebInfraProductionVPC
+  WebInfraProductionNATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionNATGatewayEIP
+  WebInfraProductionPublicNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt WebInfraProductionNATGatewayEIP.AllocationId
+      SubnetId: !Ref WebInfraProductionPrivateSubnetA
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionPublicNATGateway
+  # Route Creation for NAT Egress and IGW Ingress/Egress Routes
   WebInfraProductionRouteNATGateway:
     Type: AWS::EC2::Route
     DependsOn: WebInfraProductionPublicNATGateway
@@ -118,13 +128,14 @@ Resources:
       NatGatewayId: !Ref WebInfraProductionPublicNATGateway
   WebInfraProductionRouteIGW:
     Type: AWS::EC2::Route
-    DependsOn: WebInfraProductionPublicIGW
     Properties:
       RouteTableId: !Ref WebInfraProductionPublicRouteTable
       DestinationCidrBlock: '0.0.0.0/0'
-      NatGatewayId: !Ref WebInfraProductionPublicIGW
+      GatewayId: !Ref WebInfraProductionPublicIGW
 Outputs:
-  # Export all Subnet and VPC IDs for use in other templates
+  # Assume creation of VPC/Subnets is static and
+  # reduce template length by exporting values needed
+  # to standup resources in the VPC.
   WebInfraProductionVpcId:
     Description: VPC ID of Web Infra
     Value: !Ref WebInfraProductionVPC
