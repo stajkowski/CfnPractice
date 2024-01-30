@@ -1,6 +1,23 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: Cfn Template for Base VPC Configuration
 Transform: AWS::LanguageExtensions
+Parameters:
+  InfraBastion:
+    Description: Bastion Host Network Placement
+    Type: String
+    Default: none
+    AllowedValues:
+      - public
+      - private
+      - none
+    ConstraintDescription: Must specific public or private
+  InfraBastionSSHPort:
+    Description: Bastion Host SSH Port
+    Type: Number
+    Default: 22
+Conditions:
+  CreatePublicBastion: !Equals [ !Ref InfraBastion, public ]
+  CreatePrivateBastion: !Equals [ !Ref InfraBastion, private ]
 Mappings:
   # Public Subnets designate the ALB AZs to use on
   # backend registered private targets, so all are
@@ -33,6 +50,13 @@ Mappings:
     Private:
       Cidr: 10.0.6.0/24
       AZ: 2
+  SubnetBastion:
+    Public:
+      Cidr: 10.0.254.0/29
+      AZ: 0
+    Private:
+      Cidr: 10.0.254.8/29
+      AZ: 0
 Resources:
   # VPC & Subnet Creation
   WebInfraProductionVPC:
@@ -202,6 +226,24 @@ Resources:
               'Fn::Sub': 'WebInfraProduction${Availability}NACL'
             SubnetId: !Ref
               'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
+  # BASTION HOST
+  # Bastion subnet creation
+  WebInfraProductionPublicBastionSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WebInfraProductionVPC
+      CidrBlock: !FindInMap 
+        - SubnetBastion
+        - Public
+        - Cidr
+      AvailabilityZone: !Select [ Fn::FindInMap: [ !Ref SubnetIdentifier, !Ref Availability, AZ ], Fn::GetAZs: !Ref AWS::Region ]
+      MapPublicIpOnLaunch: !FindInMap 
+        - SubnetParameters
+        - !Ref Availability
+        - MapIpv4
+      Tags:
+        - Key: Name
+          Value: !Sub "WebInfraProduction${Availability}${SubnetIdentifier}"
 Outputs:
   # Assume creation of VPC/Subnets is static and
   # reduce template length by exporting values needed
