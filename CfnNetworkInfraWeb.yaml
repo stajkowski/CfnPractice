@@ -16,6 +16,7 @@ Parameters:
     Default: 22
 Conditions:
   CreateBastion: !Or [ !Equals [ Public , !Ref InfraBastion ], !Equals [ Private , !Ref InfraBastion ] ]
+  PublicBastion: !Equals [ Public , !Ref InfraBastion ]
 Mappings:
   # Public Subnets designate the ALB AZs to use on
   # backend registered private targets, so all are
@@ -268,7 +269,7 @@ Resources:
       RuleNumber: 10
       Protocol: 6
       RuleAction: allow
-      CidrBlock: 10.0.0.0/16
+      CidrBlock: !If [ PublicBastion, 0.0.0.0/0, 10.0.0.0/16 ]
       PortRange:
         From: !Ref InfraBastionSSHPort
         To: !Ref InfraBastionSSHPort
@@ -280,7 +281,7 @@ Resources:
       Protocol: 6
       Egress: True
       RuleAction: allow
-      CidrBlock: 10.0.0.0/16
+      CidrBlock: !If [ PublicBastion, 0.0.0.0/0, 10.0.0.0/16 ]
       PortRange:
         From: 22
         To: 22
