@@ -5,19 +5,17 @@ Parameters:
   InfraBastion:
     Description: Bastion Host Network Placement
     Type: String
-    Default: none
+    Default: Private
     AllowedValues:
-      - public
-      - private
-      - none
+      - Public
+      - Private
     ConstraintDescription: Must specific public or private
   InfraBastionSSHPort:
     Description: Bastion Host SSH Port
     Type: Number
     Default: 22
 Conditions:
-  CreatePublicBastion: !Equals [ !Ref InfraBastion, public ]
-  CreatePrivateBastion: !Equals [ !Ref InfraBastion, private ]
+  CreateBastion: !Or [ !Equals [ Public , !Ref InfraBastion ], !Equals [ Private , !Ref InfraBastion ] ]
 Mappings:
   # Public Subnets designate the ALB AZs to use on
   # backend registered private targets, so all are
@@ -52,10 +50,10 @@ Mappings:
       AZ: 2
   SubnetBastion:
     Public:
-      Cidr: 10.0.254.0/29
+      Cidr: 10.0.254.0/24
       AZ: 0
     Private:
-      Cidr: 10.0.254.8/29
+      Cidr: 10.0.254.0/24
       AZ: 0
 Resources:
   # VPC & Subnet Creation
@@ -227,23 +225,71 @@ Resources:
             SubnetId: !Ref
               'Fn::Sub': 'WebInfraProduction${Availability}${SubnetIdentifier}'
   # BASTION HOST
-  # Bastion subnet creation
-  WebInfraProductionPublicBastionSubnet:
+  # Bastion Subnet Creation
+  WebInfraProductionSubnetBastion:
     Type: AWS::EC2::Subnet
+    Condition: CreateBastion
     Properties:
       VpcId: !Ref WebInfraProductionVPC
-      CidrBlock: !FindInMap 
+      CidrBlock: !FindInMap
         - SubnetBastion
-        - Public
+        - !Ref InfraBastion
         - Cidr
-      AvailabilityZone: !Select [ Fn::FindInMap: [ !Ref SubnetIdentifier, !Ref Availability, AZ ], Fn::GetAZs: !Ref AWS::Region ]
+      AvailabilityZone: !Select [ Fn::FindInMap: [ SubnetBastion, !Ref InfraBastion, AZ ], Fn::GetAZs: !Ref AWS::Region ]
       MapPublicIpOnLaunch: !FindInMap 
         - SubnetParameters
-        - !Ref Availability
+        - !Ref InfraBastion
         - MapIpv4
       Tags:
         - Key: Name
-          Value: !Sub "WebInfraProduction${Availability}${SubnetIdentifier}"
+          Value: !Sub "WebInfraProductionSubnetBastion"
+  # Bastion Route Table Association
+  WebInfraProductionSubnetBastionRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateBastion
+    Properties:
+      RouteTableId: !Ref
+        'Fn::Sub': 
+          - 'WebInfraProduction${Availability}RouteTable'
+          - Availability: !Ref InfraBastion
+      SubnetId: !Ref WebInfraProductionSubnetBastion
+  # Bastion NACL
+  WebInfraProductionBastionNACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref WebInfraProductionVPC
+      Tags:
+        - Key: Name
+          Value: WebInfraProductionBastionNACL
+  WebInfraProductionBastionNACLIngressRule:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionBastionNACL
+      RuleNumber: 10
+      Protocol: 6
+      RuleAction: allow
+      CidrBlock: 10.0.0.0/16
+      PortRange:
+        From: !Ref InfraBastionSSHPort
+        To: !Ref InfraBastionSSHPort
+  WebInfraProductionBastionNACLEgressRule:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionBastionNACL
+      RuleNumber: 10
+      Protocol: 6
+      Egress: True
+      RuleAction: allow
+      CidrBlock: 10.0.0.0/16
+      PortRange:
+        From: 22
+        To: 22
+  # Bastion NACL Association
+  WebInfraProductionBastionNACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      NetworkAclId: !Ref WebInfraProductionBastionNACL
+      SubnetId: !Ref WebInfraProductionSubnetBastion
 Outputs:
   # Assume creation of VPC/Subnets is static and
   # reduce template length by exporting values needed
@@ -253,6 +299,12 @@ Outputs:
     Value: !Ref WebInfraProductionVPC
     Export: 
       Name: !Sub "${AWS::StackName}-WebInfraProductionVpcId"
+  WebInfraProductionSubnetBastion:
+    Description: Subnet ID of Bastion Subnet
+    Value: !Ref WebInfraProductionSubnetBastion
+    Condition: CreateBastion
+    Export: 
+      Name: !Sub "${AWS::StackName}-WebInfraProductionSubnetBastion"
   Fn::ForEach::OutputSubnets:
     - SubnetIdentifier
     - [SubnetA, SubnetB, SubnetC]
